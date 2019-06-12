@@ -18,7 +18,9 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+import collections
 import copy
+import functools
 import json
 import math
 import six
@@ -294,7 +296,7 @@ class EmbeddingPostprocessor(tf.keras.layers.Layer):
           initializer=get_initializer(self.initializer_range),
           dtype=self.dtype)
 
-    self.output_layer_norm = tf.keras.layers.LayerNormalization(
+    self.output_layer_norm = FunctionalLayerNorm(
         name="layer_norm", axis=-1, epsilon=1e-12)
     self.output_dropout = tf.keras.layers.Dropout(rate=self.dropout_prob)
     super(EmbeddingPostprocessor, self).build(input_shapes)
@@ -388,8 +390,6 @@ class Attention(tf.keras.layers.Layer):
     self.query_dense = self._projection_dense_layer("query")
     self.key_dense = self._projection_dense_layer("key")
     self.value_dense = self._projection_dense_layer("value")
-    self.attention_probs_dropout = tf.keras.layers.Dropout(
-        rate=self.attention_probs_dropout_prob)
     super(Attention, self).build(unused_input_shapes)
 
   def reshape_to_matrix(self, input_tensor):
@@ -428,37 +428,16 @@ class Attention(tf.keras.layers.Layer):
     # `value_tensor` = [B, T, N, H]
     value_tensor = self.value_dense(to_tensor)
 
-    # Take the dot product between "query" and "key" to get the raw
-    # attention scores.
-    attention_scores = tf.einsum("BFNH,BTNH->BNFT", query_tensor, key_tensor)
-    attention_scores = tf.multiply(attention_scores,
-                                   1.0 / math.sqrt(float(self.size_per_head)))
-
-    if attention_mask is not None:
-      # `attention_mask` = [B, 1, F, T]
-      attention_mask = tf.expand_dims(attention_mask, axis=[1])
-
-      # Since attention_mask is 1.0 for positions we want to attend and 0.0 for
-      # masked positions, this operation will create a tensor which is 0.0 for
-      # positions we want to attend and -10000.0 for masked positions.
-      adder = (1.0 - tf.cast(attention_mask, self.dtype)) * -10000.0
-
-      # Since we are adding it to the raw scores before the softmax, this is
-      # effectively the same as removing these entirely.
-      attention_scores += adder
-
-    # Normalize the attention scores to probabilities.
-    # `attention_probs` = [B, N, F, T]
-    attention_probs = tf.nn.softmax(attention_scores)
-
-    # This is actually dropping out entire tokens to attend to, which might
-    # seem a bit unusual, but is taken from the original Transformer paper.
-    attention_probs = self.attention_probs_dropout(attention_probs)
-
-    # `context_layer` = [B, F, N, H]
-    context_tensor = tf.einsum("BNFT,BTNH->BFNH", attention_probs, value_tensor)
-
-    return context_tensor
+    size_per_head = tf.convert_to_tensor(self.size_per_head,
+                                         dtype=query_tensor.dtype)
+    return attention(
+        query_tensor=query_tensor,
+        key_tensor=key_tensor,
+        value_tensor=value_tensor,
+        size_per_head=size_per_head,
+        attention_mask=attention_mask,
+        dropout_rate=self.attention_probs_dropout_prob,
+        training=tf.keras.backend.learning_phase())
 
   def _projection_dense_layer(self, name):
     """A helper to define a projection layer."""
@@ -571,13 +550,13 @@ class Dense3D(tf.keras.layers.Layer):
       bias = self.bias
 
     if self.output_projection:
-      ret = tf.einsum("abcd,cde->abe", inputs, kernel)
+      equation = "abcd,cde->abe"
     else:
-      ret = tf.einsum("abc,cde->abde", inputs, kernel)
-    ret += bias
-    if self.activation is not None:
-      return self.activation(ret)
-    return ret
+      equation = "abc,cde->abde"
+
+    return projection(
+        equation=equation, inputs=inputs, kernel=tf.identity(kernel),
+        bias=tf.identity(bias), activation=self.activation)
 
 
 class Dense2DProjection(tf.keras.layers.Layer):
@@ -631,11 +610,36 @@ class Dense2DProjection(tf.keras.layers.Layer):
     Returns:
       A 3D Tensor.
     """
-    ret = tf.einsum("abc,cd->abd", inputs, self.kernel)
-    ret += self.bias
-    if self.activation is not None:
-      return self.activation(ret)
-    return ret
+    return projection(
+        equation="abc,cd->abd", inputs=inputs, kernel=tf.identity(self.kernel),
+        bias=tf.identity(self.bias), activation=self.activation)
+
+
+class FunctionalLayerNorm(tf.keras.layers.LayerNormalization):
+  """Reuse the builtin layer-norm layer, but with call as a tf.function.
+
+  Layer normalization can be pretty trivially re-formulated as a pure function
+  with some state at the boundary. By grouping computations with similar
+  structure we can reduce both the model call time and gradient computation
+  time. This is a temporary formulation; ideally this should be done
+  automatically.
+  """
+
+  # TODO(taylorrobie): DO_NOT_SUBMIT: Can this be done better?
+  def call(self, inputs):
+    return _layer_norm_call(
+        inputs=inputs,
+        axis=self.axis,
+        beta=tf.identity(self.beta),
+        gamma=tf.identity(self.gamma),
+        epsilon=self.epsilon)
+
+
+@tf.function(autograph=False)
+def _layer_norm_call(inputs, axis, beta, gamma, epsilon):
+  fields = dict(axis=axis, beta=beta, gamma=gamma, epsilon=epsilon)
+  faux_layer = collections.namedtuple("FauxLayerNorm", list(fields))(**fields)
+  return tf.keras.layers.LayerNormalization.call(faux_layer, inputs)
 
 
 class TransformerBlock(tf.keras.layers.Layer):
@@ -690,7 +694,7 @@ class TransformerBlock(tf.keras.layers.Layer):
     self.attention_dropout = tf.keras.layers.Dropout(
         rate=self.hidden_dropout_prob)
     self.attention_layer_norm = (
-        tf.keras.layers.LayerNormalization(
+        FunctionalLayerNorm(
             name="self_attention_layer_norm", axis=-1, epsilon=1e-12))
     self.intermediate_dense = Dense2DProjection(
         output_size=self.intermediate_size,
@@ -702,7 +706,7 @@ class TransformerBlock(tf.keras.layers.Layer):
         kernel_initializer=get_initializer(self.initializer_range),
         name="output")
     self.output_dropout = tf.keras.layers.Dropout(rate=self.hidden_dropout_prob)
-    self.output_layer_norm = tf.keras.layers.LayerNormalization(
+    self.output_layer_norm = FunctionalLayerNorm(
         name="output_layer_norm", axis=-1, epsilon=1e-12)
     super(TransformerBlock, self).build(unused_input_shapes)
 
@@ -851,6 +855,56 @@ def is_special_none_tensor(tensor):
   return tensor.shape.ndims == 0 and tensor.dtype == tf.int32
 
 
+@tf.function(autograph=False)
+def projection(equation, inputs, kernel, bias, activation=None):
+  result = tf.einsum(equation, inputs, kernel)
+  result += bias
+  if activation is not None:
+    result = activation(result)
+  return result
+
+
+@tf.function(autograph=False)
+def attention(query_tensor, key_tensor, value_tensor, size_per_head,
+              attention_mask, dropout_rate, training):
+  attention_scores = tf.einsum("BFNH,BTNH->BNFT", query_tensor, key_tensor)
+  attention_scores /= tf.sqrt(size_per_head)
+
+  if attention_mask is not None:
+    # `attention_mask` = [B, 1, F, T]
+    attention_mask = tf.expand_dims(attention_mask, axis=[1])
+
+    # Since attention_mask is 1.0 for positions we want to attend and 0.0 for
+    # masked positions, this operation will create a tensor which is 0.0 for
+    # positions we want to attend and -10000.0 for masked positions.
+    adder = (1.0 - tf.cast(attention_mask, attention_scores.dtype)) * -10000.0
+
+    # Since we are adding it to the raw scores before the softmax, this is
+    # effectively the same as removing these entirely.
+    attention_scores += adder
+
+  # Normalize the attention scores to probabilities.
+  # `attention_probs` = [B, N, F, T]
+  attention_probs = tf.nn.softmax(attention_scores)
+
+  # This is actually dropping out entire tokens to attend to, which might
+  # seem a bit unusual, but is taken from the original Transformer paper.
+  if dropout_rate > 0:
+    if isinstance(training, tf.Tensor):
+      attention_probs = tf.cond(
+          training,
+          lambda : tf.nn.dropout(attention_probs, rate=dropout_rate),
+          lambda : tf.identity(attention_probs))
+    elif training:
+      attention_probs = tf.nn.dropout(attention_probs, rate=dropout_rate)
+
+  # `context_layer` = [B, F, N, H]
+  context_tensor = tf.einsum("BNFT,BTNH->BFNH", attention_probs, value_tensor)
+
+  return context_tensor
+
+
+@tf.function(autograph=False)
 def gelu(x):
   """Gaussian Error Linear Unit.
 

@@ -86,7 +86,117 @@ def create_optimizer(init_lr, num_train_steps, num_warmup_steps):
   return optimizer
 
 
-class AdamWeightDecay(tf.keras.optimizers.Adam):
+class AdamWithReuse(tf.keras.optimizers.Adam):
+  """Manaully cache constants.
+
+  Adjust Adam implementation until a general fix is in.
+  """
+
+  def __init__(self, *args, **kwargs):
+    super(AdamWithReuse, self).__init__(*args, **kwargs)
+    self._apply_cache = ApplyCache(self._create_step_constants)
+
+  def apply_gradients(self, grads_and_vars, name=None):
+    with self._apply_cache:
+      return super(AdamWithReuse, self).apply_gradients(grads_and_vars, name)
+
+  def _create_step_constants(self, device, var_dtype):
+    _ = device  # device is only passed as a cache key.
+
+    lr_t = self._decayed_lr(var_dtype)
+    local_step = math_ops.cast(self.iterations + 1, var_dtype)
+
+    beta_1_t = self._get_hyper('beta_1', var_dtype)
+    beta_2_t = self._get_hyper('beta_2', var_dtype)
+    beta_1_power = math_ops.pow(beta_1_t, local_step)
+    beta_2_power = math_ops.pow(beta_2_t, local_step)
+
+    return dict(
+        lr_t=lr_t,
+        lr=lr_t * math_ops.sqrt(1 - beta_2_power) / (1 - beta_1_power),
+        epsilon_t=ops.convert_to_tensor(self.epsilon, var_dtype),
+        beta_1_t=beta_1_t,
+        beta_1_power=beta_1_power,
+        one_minus_beta_1_t=1 - beta_1_t,
+        beta_2_t=beta_2_t,
+        beta_2_power=beta_2_power,
+        one_minus_beta_2_t=1 - beta_2_t)
+
+  def _resource_apply_dense(self, grad, var):
+    m = self.get_slot(var, 'm')
+    v = self.get_slot(var, 'v')
+
+    constants = self._apply_cache[var.device, var.dtype.base_dtype]
+
+    if not self.amsgrad:
+      return training_ops.resource_apply_adam(
+          var.handle,
+          m.handle,
+          v.handle,
+          constants.beta_1_power,
+          constants.beta_2_power,
+          constants.lr_t,
+          constants.beta_1_t,
+          constants.beta_2_t,
+          constants.epsilon_t,
+          grad,
+          use_locking=self._use_locking)
+    else:
+      vhat = self.get_slot(var, 'vhat')
+      return training_ops.resource_apply_adam_with_amsgrad(
+          var.handle,
+          m.handle,
+          v.handle,
+          vhat.handle,
+          constants.beta_1_power,
+          constants.beta_2_power,
+          constants.lr_t,
+          constants.beta_1_t,
+          constants.beta_2_t,
+          constants.epsilon_t,
+          grad,
+          use_locking=self._use_locking)
+
+  def _resource_apply_sparse(self, grad, var, indices):
+    constants = self._apply_cache[var.device, var.dtype.base_dtype]
+
+    # m_t = beta1 * m + (1 - beta1) * g_t
+    m = self.get_slot(var, 'm')
+    m_scaled_g_values = grad * constants.one_minus_beta_1_t
+    m_t = state_ops.assign(m, m * constants.beta_1_t,
+                           use_locking=self._use_locking)
+    with ops.control_dependencies([m_t]):
+      m_t = self._resource_scatter_add(m, indices, m_scaled_g_values)
+
+    # v_t = beta2 * v + (1 - beta2) * (g_t * g_t)
+    v = self.get_slot(var, 'v')
+    v_scaled_g_values = (grad * grad) * constants.one_minus_beta_2_t
+    v_t = state_ops.assign(v, v * constants.beta_2_t,
+                           use_locking=self._use_locking)
+    with ops.control_dependencies([v_t]):
+      v_t = self._resource_scatter_add(v, indices, v_scaled_g_values)
+
+    if not self.amsgrad:
+      v_sqrt = math_ops.sqrt(v_t)
+      var_update = state_ops.assign_sub(
+          var, constants.lr * m_t / (v_sqrt + constants.epsilon_t),
+          use_locking=self._use_locking)
+      return control_flow_ops.group(*[var_update, m_t, v_t])
+    else:
+      v_hat = self.get_slot(var, 'vhat')
+      v_hat_t = math_ops.maximum(v_hat, v_t)
+      with ops.control_dependencies([v_hat_t]):
+        v_hat_t = state_ops.assign(
+            v_hat, v_hat_t, use_locking=self._use_locking)
+      v_hat_sqrt = math_ops.sqrt(v_hat_t)
+      var_update = state_ops.assign_sub(
+          var,
+          constants.lr * m_t / (v_hat_sqrt + constants.epsilon_t),
+          use_locking=self._use_locking)
+      return control_flow_ops.group(*[var_update, m_t, v_t, v_hat_t])
+
+
+class AdamWeightDecay(AdamWithReuse):
   """Adam enables L2 weight decay and clip_by_global_norm on gradients.
 
   Just adding the square of the weights to the loss function is *not* the
@@ -135,15 +245,13 @@ class AdamWeightDecay(tf.keras.optimizers.Adam):
     return super(AdamWeightDecay, self).apply_gradients(zip(grads, tvars))
 
   def _resource_apply_dense(self, grad, var):
-    var_dtype = var.dtype.base_dtype
-    lr_t = self._decayed_lr_t[var_dtype]
+    lr_t = self._apply_cache[var.device, var.dtype.base_dtype].lr_t
     with tf.control_dependencies([self._decay_weights_op(var, lr_t)]):
       return super(AdamWeightDecay, self)._resource_apply_dense(
           grad, var)
 
   def _resource_apply_sparse(self, grad, var, indices):
-    var_dtype = var.dtype.base_dtype
-    lr_t = self._decayed_lr_t[var_dtype]
+    lr_t = self._apply_cache[var.device, var.dtype.base_dtype].lr_t
     with tf.control_dependencies([self._decay_weights_op(var, lr_t)]):
       return super(AdamWeightDecay, self)._resource_apply_sparse(
           grad, var, indices)
@@ -165,3 +273,35 @@ class AdamWeightDecay(tf.keras.optimizers.Adam):
         if re.search(r, param_name) is not None:
           return False
     return True
+
+
+class SubCache(object):
+
+  def __init__(self, init_fn, keys):
+    self.values = init_fn(*keys)
+
+  def __getattr__(self, name):
+    return self.values[name]
+
+
+class ApplyCache(object):
+
+  def __init__(self, init_fn):
+    self._init_fn = init_fn
+    self._sub_caches = None
+
+  def __enter__(self):
+    self._sub_caches = {}
+
+  def __exit__(self, exc_type, exc_val, exc_tb):
+    self._sub_caches = None
+
+  def __getitem__(self, keys):
+    if self._sub_caches is None:
+      raise ValueError('Cache is not valid outside of gradient apply.')
+
+    sub_cache = self._sub_caches.get(keys)
+    if sub_cache is None:
+      self._sub_caches[keys] = sub_cache = SubCache(self._init_fn, keys)
+    return sub_cache
+
