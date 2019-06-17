@@ -21,6 +21,7 @@ from __future__ import print_function
 import re
 
 import tensorflow as tf
+from tensorflow.python.training import training_ops
 
 
 class WarmUp(tf.keras.optimizers.schedules.LearningRateSchedule):
@@ -104,17 +105,17 @@ class AdamWithReuse(tf.keras.optimizers.Adam):
     _ = device  # device is only passed as a cache key.
 
     lr_t = self._decayed_lr(var_dtype)
-    local_step = math_ops.cast(self.iterations + 1, var_dtype)
+    local_step = tf.cast(self.iterations + 1, var_dtype)
 
     beta_1_t = self._get_hyper('beta_1', var_dtype)
     beta_2_t = self._get_hyper('beta_2', var_dtype)
-    beta_1_power = math_ops.pow(beta_1_t, local_step)
-    beta_2_power = math_ops.pow(beta_2_t, local_step)
+    beta_1_power = tf.pow(beta_1_t, local_step)
+    beta_2_power = tf.pow(beta_2_t, local_step)
 
     return dict(
         lr_t=lr_t,
-        lr=lr_t * math_ops.sqrt(1 - beta_2_power) / (1 - beta_1_power),
-        epsilon_t=ops.convert_to_tensor(self.epsilon, var_dtype),
+        lr=lr_t * tf.sqrt(1 - beta_2_power) / (1 - beta_1_power),
+        epsilon_t=tf.convert_to_tensor(self.epsilon, var_dtype),
         beta_1_t=beta_1_t,
         beta_1_power=beta_1_power,
         one_minus_beta_1_t=1 - beta_1_t,
@@ -163,37 +164,37 @@ class AdamWithReuse(tf.keras.optimizers.Adam):
     # m_t = beta1 * m + (1 - beta1) * g_t
     m = self.get_slot(var, 'm')
     m_scaled_g_values = grad * constants.one_minus_beta_1_t
-    m_t = state_ops.assign(m, m * constants.beta_1_t,
+    m_t = tf.compat.v1.assign(m, m * constants.beta_1_t,
                            use_locking=self._use_locking)
-    with ops.control_dependencies([m_t]):
+    with tf.control_dependencies([m_t]):
       m_t = self._resource_scatter_add(m, indices, m_scaled_g_values)
 
     # v_t = beta2 * v + (1 - beta2) * (g_t * g_t)
     v = self.get_slot(var, 'v')
     v_scaled_g_values = (grad * grad) * constants.one_minus_beta_2_t
-    v_t = state_ops.assign(v, v * constants.beta_2_t,
+    v_t = tf.compat.v1.assign(v, v * constants.beta_2_t,
                            use_locking=self._use_locking)
-    with ops.control_dependencies([v_t]):
+    with tf.control_dependencies([v_t]):
       v_t = self._resource_scatter_add(v, indices, v_scaled_g_values)
 
     if not self.amsgrad:
-      v_sqrt = math_ops.sqrt(v_t)
-      var_update = state_ops.assign_sub(
+      v_sqrt = tf.sqrt(v_t)
+      var_update = tf.compat.v1.assign_sub(
           var, constants.lr * m_t / (v_sqrt + constants.epsilon_t),
           use_locking=self._use_locking)
-      return control_flow_ops.group(*[var_update, m_t, v_t])
+      return tf.group(*[var_update, m_t, v_t])
     else:
       v_hat = self.get_slot(var, 'vhat')
-      v_hat_t = math_ops.maximum(v_hat, v_t)
-      with ops.control_dependencies([v_hat_t]):
-        v_hat_t = state_ops.assign(
+      v_hat_t = tf.maximum(v_hat, v_t)
+      with tf.control_dependencies([v_hat_t]):
+        v_hat_t = tf.compat.v1.assign(
             v_hat, v_hat_t, use_locking=self._use_locking)
-      v_hat_sqrt = math_ops.sqrt(v_hat_t)
-      var_update = state_ops.assign_sub(
+      v_hat_sqrt = tf.sqrt(v_hat_t)
+      var_update = tf.compat.v1.assign_sub(
           var,
           constants.lr * m_t / (v_hat_sqrt + constants.epsilon_t),
           use_locking=self._use_locking)
-      return control_flow_ops.group(*[var_update, m_t, v_t, v_hat_t])
+      return tf.group(*[var_update, m_t, v_t, v_hat_t])
 
 
 class AdamWeightDecay(AdamWithReuse):
