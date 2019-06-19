@@ -104,11 +104,11 @@ class AdamWithReuse(tf.keras.optimizers.Adam):
   def _create_step_constants(self, device, var_dtype):
     _ = device  # device is only passed as a cache key.
 
-    lr_t = self._decayed_lr(var_dtype)
+    lr_t = tf.identity(self._decayed_lr(var_dtype))
     local_step = tf.cast(self.iterations + 1, var_dtype)
 
-    beta_1_t = self._get_hyper('beta_1', var_dtype)
-    beta_2_t = self._get_hyper('beta_2', var_dtype)
+    beta_1_t = tf.identity(self._get_hyper('beta_1', var_dtype))
+    beta_2_t = tf.identity(self._get_hyper('beta_2', var_dtype))
     beta_1_power = tf.pow(beta_1_t, local_step)
     beta_2_power = tf.pow(beta_2_t, local_step)
 
