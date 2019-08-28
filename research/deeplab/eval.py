@@ -18,9 +18,9 @@ See model.py for more details and usage.
 """
 
 import tensorflow as tf
-from deeplab import common
-from deeplab import model
-from deeplab.datasets import data_generator
+import common
+import model
+from datasets import data_generator
 
 flags = tf.app.flags
 FLAGS = flags.FLAGS
@@ -29,9 +29,9 @@ flags.DEFINE_string('master', '', 'BNS name of the tensorflow server')
 
 # Settings for log directories.
 
-flags.DEFINE_string('eval_logdir', None, 'Where to write the event logs.')
+flags.DEFINE_string('eval_logdir', './result', 'Where to write the event logs.')
 
-flags.DEFINE_string('checkpoint_dir', None, 'Directory of model checkpoints.')
+flags.DEFINE_string('checkpoint_dir', './result', 'Directory of model checkpoints.')
 
 # Settings for evaluating the model.
 
@@ -67,17 +67,27 @@ flags.DEFINE_integer(
 
 # Dataset settings.
 
-flags.DEFINE_string('dataset', 'pascal_voc_seg',
+flags.DEFINE_string('dataset', 'cityscapes',
                     'Name of the segmentation dataset.')
 
 flags.DEFINE_string('eval_split', 'val',
                     'Which split of the dataset used for evaluation')
 
-flags.DEFINE_string('dataset_dir', None, 'Where the dataset reside.')
+flags.DEFINE_string('dataset_dir', r'E:\BaiduNetdiskDownload\cityscapes', 'Where the dataset reside.')
 
 flags.DEFINE_integer('max_number_of_evaluations', 0,
                      'Maximum number of eval iterations. Will loop '
                      'indefinitely upon nonpositive values.')
+
+
+
+
+
+
+def stats_graph(graph):
+	flops = tf.profiler.profile(graph, options=tf.profiler.ProfileOptionBuilder.float_operation())
+	params = tf.profiler.profile(graph, options=tf.profiler.ProfileOptionBuilder.trainable_variables_parameter())
+	print('FLOPs: {};    Trainable params: {}'.format(flops.total_float_ops, params.total_parameters))
 
 
 def main(unused_argv):
@@ -172,13 +182,17 @@ def main(unused_argv):
     tf.contrib.tfprof.model_analyzer.print_model_analysis(
         tf.get_default_graph(),
         tfprof_options=tf.contrib.tfprof.model_analyzer.FLOAT_OPS_OPTIONS)
-    tf.contrib.training.evaluate_repeatedly(
-        master=FLAGS.master,
-        checkpoint_dir=FLAGS.checkpoint_dir,
-        eval_ops=[update_op],
-        max_number_of_evaluations=num_eval_iters,
-        hooks=hooks,
-        eval_interval_secs=FLAGS.eval_interval_secs)
+    # tf.contrib.training.evaluate_repeatedly(
+    #     master=FLAGS.master,
+    #     checkpoint_dir=FLAGS.checkpoint_dir,
+    #     eval_ops=[update_op],
+    #     max_number_of_evaluations=num_eval_iters,
+    #     hooks=hooks,
+    #     eval_interval_secs=FLAGS.eval_interval_secs)
+
+
+
+    stats_graph(tf.get_default_graph())
 
 
 if __name__ == '__main__':

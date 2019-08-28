@@ -19,7 +19,7 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
-from deeplab.core import nas_cell
+from core import nas_cell
 
 
 class PNASCell(nas_cell.NASBaseCell):

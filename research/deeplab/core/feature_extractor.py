@@ -17,9 +17,12 @@
 import functools
 import tensorflow as tf
 
-from deeplab.core import nas_network
-from deeplab.core import resnet_v1_beta
-from deeplab.core import xception
+# import tf.slim.nets.mobilenet as mobilenet
+
+
+from core import nas_network
+from core import resnet_v1_beta
+from core import xception
 from tensorflow.contrib.slim.nets import resnet_utils
 from nets.mobilenet import mobilenet_v2
 
