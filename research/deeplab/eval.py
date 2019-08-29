@@ -29,16 +29,18 @@ flags.DEFINE_string('master', '', 'BNS name of the tensorflow server')
 
 # Settings for log directories.
 
-flags.DEFINE_string('eval_logdir', './result', 'Where to write the event logs.')
+flags.DEFINE_string('eval_logdir', './result',
+                    'Where to write the event logs.')
 
-flags.DEFINE_string('checkpoint_dir', './result', 'Directory of model checkpoints.')
+flags.DEFINE_string('checkpoint_dir', './result',
+                    'Directory of model checkpoints.')
 
 # Settings for evaluating the model.
 
 flags.DEFINE_integer('eval_batch_size', 1,
                      'The number of images in each batch during evaluation.')
 
-flags.DEFINE_list('eval_crop_size', '513,513',
+flags.DEFINE_list('eval_crop_size', '1025,2049',
                   'Image crop size [height, width] for evaluation.')
 
 flags.DEFINE_integer('eval_interval_secs', 60 * 5,
@@ -47,10 +49,10 @@ flags.DEFINE_integer('eval_interval_secs', 60 * 5,
 # For `xception_65`, use atrous_rates = [12, 24, 36] if output_stride = 8, or
 # rates = [6, 12, 18] if output_stride = 16. For `mobilenet_v2`, use None. Note
 # one could use different atrous_rates/output_stride during training/evaluation.
-flags.DEFINE_multi_integer('atrous_rates', None,
+flags.DEFINE_multi_integer('atrous_rates', [12, 24, 36],
                            'Atrous rates for atrous spatial pyramid pooling.')
 
-flags.DEFINE_integer('output_stride', 16,
+flags.DEFINE_integer('output_stride', 8,
                      'The ratio of input to output spatial resolution.')
 
 # Change to [0.5, 0.75, 1.0, 1.25, 1.5, 1.75] for multi-scale test.
@@ -73,130 +75,128 @@ flags.DEFINE_string('dataset', 'cityscapes',
 flags.DEFINE_string('eval_split', 'val',
                     'Which split of the dataset used for evaluation')
 
-flags.DEFINE_string('dataset_dir', r'E:\BaiduNetdiskDownload\cityscapes', 'Where the dataset reside.')
+flags.DEFINE_string(
+    'dataset_dir', r'E:\BaiduNetdiskDownload\cityscapes', 'Where the dataset reside.')
 
 flags.DEFINE_integer('max_number_of_evaluations', 0,
                      'Maximum number of eval iterations. Will loop '
                      'indefinitely upon nonpositive values.')
 
 
-
-
-
-
 def stats_graph(graph):
-	flops = tf.profiler.profile(graph, options=tf.profiler.ProfileOptionBuilder.float_operation())
-	params = tf.profiler.profile(graph, options=tf.profiler.ProfileOptionBuilder.trainable_variables_parameter())
-	print('FLOPs: {};    Trainable params: {}'.format(flops.total_float_ops, params.total_parameters))
+    flops = tf.profiler.profile(
+        graph, options=tf.profiler.ProfileOptionBuilder.float_operation())
+    params = tf.profiler.profile(
+        graph, options=tf.profiler.ProfileOptionBuilder.trainable_variables_parameter())
+    print('FLOPs: {};    Trainable params: {}'.format(
+        flops.total_float_ops, params.total_parameters))
 
 
 def main(unused_argv):
-  tf.logging.set_verbosity(tf.logging.INFO)
+    tf.logging.set_verbosity(tf.logging.INFO)
 
-  dataset = data_generator.Dataset(
-      dataset_name=FLAGS.dataset,
-      split_name=FLAGS.eval_split,
-      dataset_dir=FLAGS.dataset_dir,
-      batch_size=FLAGS.eval_batch_size,
-      crop_size=[int(sz) for sz in FLAGS.eval_crop_size],
-      min_resize_value=FLAGS.min_resize_value,
-      max_resize_value=FLAGS.max_resize_value,
-      resize_factor=FLAGS.resize_factor,
-      model_variant=FLAGS.model_variant,
-      num_readers=2,
-      is_training=False,
-      should_shuffle=False,
-      should_repeat=False)
-
-  tf.gfile.MakeDirs(FLAGS.eval_logdir)
-  tf.logging.info('Evaluating on %s set', FLAGS.eval_split)
-
-  with tf.Graph().as_default():
-    samples = dataset.get_one_shot_iterator().get_next()
-
-    model_options = common.ModelOptions(
-        outputs_to_num_classes={common.OUTPUT_TYPE: dataset.num_of_classes},
+    dataset = data_generator.Dataset(
+        dataset_name=FLAGS.dataset,
+        split_name=FLAGS.eval_split,
+        dataset_dir=FLAGS.dataset_dir,
+        batch_size=FLAGS.eval_batch_size,
         crop_size=[int(sz) for sz in FLAGS.eval_crop_size],
-        atrous_rates=FLAGS.atrous_rates,
-        output_stride=FLAGS.output_stride)
+        min_resize_value=FLAGS.min_resize_value,
+        max_resize_value=FLAGS.max_resize_value,
+        resize_factor=FLAGS.resize_factor,
+        model_variant=FLAGS.model_variant,
+        num_readers=2,
+        is_training=False,
+        should_shuffle=False,
+        should_repeat=False)
 
-    # Set shape in order for tf.contrib.tfprof.model_analyzer to work properly.
-    samples[common.IMAGE].set_shape(
-        [FLAGS.eval_batch_size,
-         int(FLAGS.eval_crop_size[0]),
-         int(FLAGS.eval_crop_size[1]),
-         3])
-    if tuple(FLAGS.eval_scales) == (1.0,):
-      tf.logging.info('Performing single-scale test.')
-      predictions = model.predict_labels(samples[common.IMAGE], model_options,
-                                         image_pyramid=FLAGS.image_pyramid)
-    else:
-      tf.logging.info('Performing multi-scale test.')
-      if FLAGS.quantize_delay_step >= 0:
-        raise ValueError(
-            'Quantize mode is not supported with multi-scale test.')
+    tf.gfile.MakeDirs(FLAGS.eval_logdir)
+    tf.logging.info('Evaluating on %s set', FLAGS.eval_split)
 
-      predictions = model.predict_labels_multi_scale(
-          samples[common.IMAGE],
-          model_options=model_options,
-          eval_scales=FLAGS.eval_scales,
-          add_flipped_images=FLAGS.add_flipped_images)
-    predictions = predictions[common.OUTPUT_TYPE]
-    predictions = tf.reshape(predictions, shape=[-1])
-    labels = tf.reshape(samples[common.LABEL], shape=[-1])
-    weights = tf.to_float(tf.not_equal(labels, dataset.ignore_label))
+    with tf.Graph().as_default():
+        samples = dataset.get_one_shot_iterator().get_next()
 
-    # Set ignore_label regions to label 0, because metrics.mean_iou requires
-    # range of labels = [0, dataset.num_classes). Note the ignore_label regions
-    # are not evaluated since the corresponding regions contain weights = 0.
-    labels = tf.where(
-        tf.equal(labels, dataset.ignore_label), tf.zeros_like(labels), labels)
+        model_options = common.ModelOptions(
+            outputs_to_num_classes={
+                common.OUTPUT_TYPE: dataset.num_of_classes},
+            crop_size=[int(sz) for sz in FLAGS.eval_crop_size],
+            atrous_rates=FLAGS.atrous_rates,
+            output_stride=FLAGS.output_stride)
 
-    predictions_tag = 'miou'
-    for eval_scale in FLAGS.eval_scales:
-      predictions_tag += '_' + str(eval_scale)
-    if FLAGS.add_flipped_images:
-      predictions_tag += '_flipped'
+        # Set shape in order for tf.contrib.tfprof.model_analyzer to work properly.
+        samples[common.IMAGE].set_shape(
+            [FLAGS.eval_batch_size,
+             int(FLAGS.eval_crop_size[0]),
+             int(FLAGS.eval_crop_size[1]),
+             3])
+        if tuple(FLAGS.eval_scales) == (1.0,):
+            tf.logging.info('Performing single-scale test.')
+            predictions = model.predict_labels(samples[common.IMAGE], model_options,
+                                               image_pyramid=FLAGS.image_pyramid)
+        else:
+            tf.logging.info('Performing multi-scale test.')
+            if FLAGS.quantize_delay_step >= 0:
+                raise ValueError(
+                    'Quantize mode is not supported with multi-scale test.')
+            predictions = model.predict_labels_multi_scale(
+                samples[common.IMAGE],
+                model_options=model_options,
+                eval_scales=FLAGS.eval_scales,
+                add_flipped_images=FLAGS.add_flipped_images)
+        predictions = predictions[common.OUTPUT_TYPE]
+        predictions = tf.reshape(predictions, shape=[-1])
+        labels = tf.reshape(samples[common.LABEL], shape=[-1])
+        weights = tf.to_float(tf.not_equal(labels, dataset.ignore_label))
 
-    # Define the evaluation metric.
-    miou, update_op = tf.metrics.mean_iou(
-        predictions, labels, dataset.num_of_classes, weights=weights)
-    tf.summary.scalar(predictions_tag, miou)
+        # Set ignore_label regions to label 0, because metrics.mean_iou requires
+        # range of labels = [0, dataset.num_classes). Note the ignore_label regions
+        # are not evaluated since the corresponding regions contain weights = 0.
+        labels = tf.where(
+            tf.equal(labels, dataset.ignore_label), tf.zeros_like(labels), labels)
 
-    summary_op = tf.summary.merge_all()
-    summary_hook = tf.contrib.training.SummaryAtEndHook(
-        log_dir=FLAGS.eval_logdir, summary_op=summary_op)
-    hooks = [summary_hook]
+        predictions_tag = 'miou'
+        for eval_scale in FLAGS.eval_scales:
+            predictions_tag += '_' + str(eval_scale)
+        if FLAGS.add_flipped_images:
+            predictions_tag += '_flipped'
 
-    num_eval_iters = None
-    if FLAGS.max_number_of_evaluations > 0:
-      num_eval_iters = FLAGS.max_number_of_evaluations
+        # Define the evaluation metric.
+        miou, update_op = tf.metrics.mean_iou(
+            predictions, labels, dataset.num_of_classes, weights=weights)
+        tf.summary.scalar(predictions_tag, miou)
 
-    if FLAGS.quantize_delay_step >= 0:
-      tf.contrib.quantize.create_eval_graph()
+        summary_op = tf.summary.merge_all()
+        summary_hook = tf.contrib.training.SummaryAtEndHook(
+            log_dir=FLAGS.eval_logdir, summary_op=summary_op)
+        hooks = [summary_hook]
 
-    tf.contrib.tfprof.model_analyzer.print_model_analysis(
-        tf.get_default_graph(),
-        tfprof_options=tf.contrib.tfprof.model_analyzer.
-        TRAINABLE_VARS_PARAMS_STAT_OPTIONS)
-    tf.contrib.tfprof.model_analyzer.print_model_analysis(
-        tf.get_default_graph(),
-        tfprof_options=tf.contrib.tfprof.model_analyzer.FLOAT_OPS_OPTIONS)
-    # tf.contrib.training.evaluate_repeatedly(
-    #     master=FLAGS.master,
-    #     checkpoint_dir=FLAGS.checkpoint_dir,
-    #     eval_ops=[update_op],
-    #     max_number_of_evaluations=num_eval_iters,
-    #     hooks=hooks,
-    #     eval_interval_secs=FLAGS.eval_interval_secs)
+        num_eval_iters = None
+        if FLAGS.max_number_of_evaluations > 0:
+            num_eval_iters = FLAGS.max_number_of_evaluations
 
+        if FLAGS.quantize_delay_step >= 0:
+            tf.contrib.quantize.create_eval_graph()
 
+        # tf.contrib.tfprof.model_analyzer.print_model_analysis(
+        #     tf.get_default_graph(),
+        #     tfprof_options=tf.contrib.tfprof.model_analyzer.
+        #     TRAINABLE_VARS_PARAMS_STAT_OPTIONS)
+        tf.contrib.tfprof.model_analyzer.print_model_analysis(
+            tf.get_default_graph(),
+            tfprof_options=tf.contrib.tfprof.model_analyzer.FLOAT_OPS_OPTIONS)
+        # tf.contrib.training.evaluate_repeatedly(
+        #     master=FLAGS.master,
+        #     checkpoint_dir=FLAGS.checkpoint_dir,
+        #     eval_ops=[update_op],
+        #     max_number_of_evaluations=num_eval_iters,
+        #     hooks=hooks,
+        #     eval_interval_secs=FLAGS.eval_interval_secs)
 
-    stats_graph(tf.get_default_graph())
+        # stats_graph(tf.get_default_graph())
 
 
 if __name__ == '__main__':
-  flags.mark_flag_as_required('checkpoint_dir')
-  flags.mark_flag_as_required('eval_logdir')
-  flags.mark_flag_as_required('dataset_dir')
-  tf.app.run()
+    flags.mark_flag_as_required('checkpoint_dir')
+    flags.mark_flag_as_required('eval_logdir')
+    flags.mark_flag_as_required('dataset_dir')
+    tf.app.run()

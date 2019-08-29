@@ -20,10 +20,10 @@ See model.py for more details and usage.
 import six
 import tensorflow as tf
 from tensorflow.python.ops import math_ops
-from deeplab import common
-from deeplab import model
-from deeplab.datasets import data_generator
-from deeplab.utils import train_utils
+import common
+import model
+from datasets import data_generator
+from utils import train_utils
 
 flags = tf.app.flags
 FLAGS = flags.FLAGS
@@ -50,7 +50,7 @@ flags.DEFINE_integer('task', 0, 'The task ID.')
 
 # Settings for logging.
 
-flags.DEFINE_string('train_logdir', None,
+flags.DEFINE_string('train_logdir','./result',
                     'Where the checkpoint and logs are stored.')
 
 flags.DEFINE_integer('log_steps', 10,
@@ -69,7 +69,7 @@ flags.DEFINE_boolean(
 
 # Settings for profiling.
 
-flags.DEFINE_string('profile_logdir', None,
+flags.DEFINE_string('profile_logdir', './log',
                     'Where the profile files are stored.')
 
 # Settings for training strategy.
@@ -99,7 +99,7 @@ flags.DEFINE_float('momentum', 0.9, 'The momentum value to use')
 # When fine_tune_batch_norm=True, use at least batch size larger than 12
 # (batch size more than 16 is better). Otherwise, one could use smaller batch
 # size and set fine_tune_batch_norm=False.
-flags.DEFINE_integer('train_batch_size', 8,
+flags.DEFINE_integer('train_batch_size', 4,
                      'The number of images in each batch during training.')
 
 # For weight_decay, use 0.00004 for MobileNet-V2 or Xcpetion model variants.
@@ -107,7 +107,7 @@ flags.DEFINE_integer('train_batch_size', 8,
 flags.DEFINE_float('weight_decay', 0.00004,
                    'The value of the weight decay for training.')
 
-flags.DEFINE_list('train_crop_size', '513,513',
+flags.DEFINE_list('train_crop_size', '1025,2049',
                   'Image crop size [height, width] during training.')
 
 flags.DEFINE_float(
@@ -192,7 +192,7 @@ flags.DEFINE_string('dataset', 'pascal_voc_seg',
 flags.DEFINE_string('train_split', 'train',
                     'Which split of the dataset to be used for training')
 
-flags.DEFINE_string('dataset_dir', None, 'Where the dataset reside.')
+flags.DEFINE_string('dataset_dir', r'E:\BaiduNetdiskDownload\cityscapes', 'Where the dataset reside.')
 
 
 def _build_deeplab(iterator, outputs_to_num_classes, ignore_label):
@@ -427,6 +427,10 @@ def _train_deeplab_model(iterator, num_of_classes, ignore_label):
 
   return train_tensor, summary_op
 
+def stats_graph(graph):
+	flops = tf.profiler.profile(graph, options=tf.profiler.ProfileOptionBuilder.float_operation())
+	params = tf.profiler.profile(graph, options=tf.profiler.ProfileOptionBuilder.trainable_variables_parameter())
+	print('FLOPs: {};    Trainable params: {}'.format(flops.total_float_ops, params.total_parameters))
 
 def main(unused_argv):
   tf.logging.set_verbosity(tf.logging.INFO)
