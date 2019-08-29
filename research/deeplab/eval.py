@@ -88,8 +88,8 @@ def stats_graph(graph):
         graph, options=tf.profiler.ProfileOptionBuilder.float_operation())
     params = tf.profiler.profile(
         graph, options=tf.profiler.ProfileOptionBuilder.trainable_variables_parameter())
-    print('FLOPs: {};    Trainable params: {}'.format(
-        flops.total_float_ops, params.total_parameters))
+    print('Multi-Adds: {};    Trainable params: {}'.format(
+        flops.total_float_ops / 2, params.total_parameters))
 
 
 def main(unused_argv):
@@ -181,9 +181,9 @@ def main(unused_argv):
         #     tf.get_default_graph(),
         #     tfprof_options=tf.contrib.tfprof.model_analyzer.
         #     TRAINABLE_VARS_PARAMS_STAT_OPTIONS)
-        tf.contrib.tfprof.model_analyzer.print_model_analysis(
-            tf.get_default_graph(),
-            tfprof_options=tf.contrib.tfprof.model_analyzer.FLOAT_OPS_OPTIONS)
+        # tf.contrib.tfprof.model_analyzer.print_model_analysis(
+        #     tf.get_default_graph(),
+        #     tfprof_options=tf.contrib.tfprof.model_analyzer.FLOAT_OPS_OPTIONS)
         # tf.contrib.training.evaluate_repeatedly(
         #     master=FLAGS.master,
         #     checkpoint_dir=FLAGS.checkpoint_dir,
@@ -192,7 +192,7 @@ def main(unused_argv):
         #     hooks=hooks,
         #     eval_interval_secs=FLAGS.eval_interval_secs)
 
-        # stats_graph(tf.get_default_graph())
+        stats_graph(tf.get_default_graph())
 
 
 if __name__ == '__main__':

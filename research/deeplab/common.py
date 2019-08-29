@@ -44,7 +44,7 @@ flags.DEFINE_integer('logits_kernel_size', 1,
 # When using 'xception_65' or 'resnet_v1' model variants, we set
 # atrous_rates = [6, 12, 18] (output stride 16) and decoder_output_stride = 4.
 # See core/feature_extractor.py for supported model variants.
-flags.DEFINE_string('model_variant', 'xception_71', 'DeepLab model variant.')
+flags.DEFINE_string('model_variant', 'nas_hnasnet', 'DeepLab model variant.')
 
 flags.DEFINE_multi_float('image_pyramid', None,
                          'Input scales for multi-scale feature extraction.')
@@ -65,7 +65,7 @@ flags.DEFINE_list(
 flags.DEFINE_boolean('aspp_with_batch_norm', True,
                      'Use batch norm parameters for ASPP or not.')
 
-flags.DEFINE_boolean('aspp_with_separable_conv', True,
+flags.DEFINE_boolean('aspp_with_separable_conv', False,
                      'Use separable convolution for ASPP or not.')
 
 # Defaults to None. Set multi_grid = [1, 2, 4] when using provided
@@ -90,7 +90,7 @@ flags.DEFINE_list('decoder_output_stride', [4],
                   'most one output stride (i.e., either None or a list with '
                   'only one element.')
 
-flags.DEFINE_boolean('decoder_use_separable_conv', True,
+flags.DEFINE_boolean('decoder_use_separable_conv', False,
                      'Employ separable convolution for decoder or not.')
 
 flags.DEFINE_enum('merge_method', 'max', ['max', 'avg'],
@@ -111,7 +111,7 @@ flags.DEFINE_string(
     'A JSON file that specifies the dense prediction cell.')
 
 flags.DEFINE_integer(
-    'nas_stem_output_num_conv_filters', 20,
+    'nas_stem_output_num_conv_filters', 32,
     'Number of filters of the stem output tensor in NAS models.')
 
 flags.DEFINE_bool('use_bounded_activation', False,
