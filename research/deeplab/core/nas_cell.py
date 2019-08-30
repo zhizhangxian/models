@@ -95,13 +95,16 @@ class NASBaseCell(object):
       prev_layer = net
     else:
       if net.shape[2] != prev_layer.shape[2]:
+        ### resize feature_prev
         prev_layer = resize_bilinear(
             prev_layer, tf.shape(net)[1:3], prev_layer.dtype)
-      if filter_size != prev_layer.shape[3]:
-        prev_layer = tf.nn.relu(prev_layer)
-        prev_layer = slim.conv2d(prev_layer, filter_size, 1, scope='prev_1x1')
-        prev_layer = slim.batch_norm(prev_layer, scope='prev_bn')
+        ### reshape feature_prev_prev
+        if filter_size != prev_layer.shape[3]:
+            prev_layer = tf.nn.relu(prev_layer)
+            prev_layer = slim.conv2d(prev_layer, filter_size, 1, scope='prev_1x1')
+            prev_layer = slim.batch_norm(prev_layer, scope='prev_bn')
 
+    ### reshape feature_prev to F*2
     net = tf.nn.relu(net)
     net = slim.conv2d(net, filter_size, 1, scope='1x1')
     net = slim.batch_norm(net, scope='beginning_bn')
