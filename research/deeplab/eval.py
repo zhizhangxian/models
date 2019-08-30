@@ -177,10 +177,10 @@ def main(unused_argv):
         if FLAGS.quantize_delay_step >= 0:
             tf.contrib.quantize.create_eval_graph()
 
-        # tf.contrib.tfprof.model_analyzer.print_model_analysis(
-        #     tf.get_default_graph(),
-        #     tfprof_options=tf.contrib.tfprof.model_analyzer.
-        #     TRAINABLE_VARS_PARAMS_STAT_OPTIONS)
+        tf.contrib.tfprof.model_analyzer.print_model_analysis(
+            tf.get_default_graph(),
+            tfprof_options=tf.contrib.tfprof.model_analyzer.
+            TRAINABLE_VARS_PARAMS_STAT_OPTIONS)
         tf.contrib.tfprof.model_analyzer.print_model_analysis(
             tf.get_default_graph(),
             tfprof_options=tf.contrib.tfprof.model_analyzer.FLOAT_OPS_OPTIONS)
@@ -192,7 +192,7 @@ def main(unused_argv):
         #     hooks=hooks,
         #     eval_interval_secs=FLAGS.eval_interval_secs)
 
-        # stats_graph(tf.get_default_graph())
+        stats_graph(tf.get_default_graph())
 
 
 if __name__ == '__main__':

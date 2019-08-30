@@ -552,19 +552,19 @@ def _get_logits(images,
       fine_tune_batch_norm=fine_tune_batch_norm,
       nas_training_hyper_parameters=nas_training_hyper_parameters)
 
-  if model_options.decoder_output_stride is not None:
-    features = refine_by_decoder(
-        features,
-        end_points,
-        crop_size=model_options.crop_size,
-        decoder_output_stride=model_options.decoder_output_stride,
-        decoder_use_separable_conv=model_options.decoder_use_separable_conv,
-        model_variant=model_options.model_variant,
-        weight_decay=weight_decay,
-        reuse=reuse,
-        is_training=is_training,
-        fine_tune_batch_norm=fine_tune_batch_norm,
-        use_bounded_activation=model_options.use_bounded_activation)
+#   if model_options.decoder_output_stride is not None:
+#     features = refine_by_decoder(
+#         features,
+#         end_points,
+#         crop_size=model_options.crop_size,
+#         decoder_output_stride=model_options.decoder_output_stride,
+#         decoder_use_separable_conv=model_options.decoder_use_separable_conv,
+#         model_variant=model_options.model_variant,
+#         weight_decay=weight_decay,
+#         reuse=reuse,
+#         is_training=is_training,
+#         fine_tune_batch_norm=fine_tune_batch_norm,
+#         use_bounded_activation=model_options.use_bounded_activation)
 
   outputs_to_logits = {}
   for output in sorted(model_options.outputs_to_num_classes):
