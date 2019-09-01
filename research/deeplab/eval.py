@@ -135,7 +135,7 @@ def main(unused_argv):
                                                image_pyramid=FLAGS.image_pyramid)
         else:
             tf.logging.info('Performing multi-scale test.')
-            if FLAGS.quantize_delay_step >= 0:
+            if FLAGS.quantize_delay_step > = 0:
                 raise ValueError(
                     'Quantize mode is not supported with multi-scale test.')
             predictions = model.predict_labels_multi_scale(
